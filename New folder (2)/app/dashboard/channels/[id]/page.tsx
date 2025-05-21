@@ -36,10 +36,11 @@ type Channel = {
   created_at: number
   invite_code: string
   verification: boolean
-  description_at: string
+  description_at: number
   preview: string
   role: string
   updatedAt: string
+  createdAt: string
 }
 
 export default function ChannelDetailsPage() {
@@ -115,19 +116,20 @@ export default function ChannelDetailsPage() {
 
         // Map the API response to our Channel type
         const channelData: Channel = {
-          id: data.data.id,
-          name: data.data.name,
-          type: data.data.type,
-          description: data.data.description,
-          chat_pic: data.data.chat_pic,
-          chat_pic_full: data.data.chat_pic_full,
-          created_at: data.data.created_at,
-          invite_code: data.data.invite_code,
-          verification: data.data.verification,
-          description_at: data.data.description_at,
-          preview: data.data.preview,
-          role: data.data.role,
-          updatedAt: data.data.updatedAt
+          id: data.data._id || data.data.id || '',
+          name: data.data.name || '',
+          type: data.data.type || '',
+          description: data.data.description || '',
+          chat_pic: data.data.chat_pic || '',
+          chat_pic_full: data.data.chat_pic_full || '',
+          created_at: data.data.created_at || 0,
+          invite_code: data.data.invite_code || '',
+          verification: data.data.verification || false,
+          description_at: data.data.description_at || 0,
+          preview: data.data.preview || '',
+          role: data.data.role || 'subscriber',
+          updatedAt: data.data.updatedAt || '',
+          createdAt: data.data.createdAt || ''
         }
 
         console.log('Setting channel data:', channelData)
@@ -167,13 +169,26 @@ export default function ChannelDetailsPage() {
     }
   }, [channelId, toast])
 
-  // Function to format Unix timestamp
-  const formatDate = (timestamp: number | string) => {
+  // Function to format date string or timestamp
+  const formatDate = (dateValue: number | string) => {
     try {
-      const date = typeof timestamp === 'string' ? new Date(timestamp) : new Date(timestamp * 1000)
-      return format(date, "MMMM d, yyyy 'at' h:mm a")
+      if (!dateValue) return "N/A";
+      
+      let date: Date;
+      if (typeof dateValue === 'string') {
+        date = new Date(dateValue);
+      } else {
+        date = new Date(dateValue * 1000);
+      }
+      
+      if (isNaN(date.getTime())) {
+        return "Invalid date";
+      }
+      
+      return format(date, "MMMM d, yyyy 'at' h:mm a");
     } catch (error) {
-      return "Invalid date"
+      console.error('Date formatting error:', error);
+      return "Invalid date";
     }
   }
 

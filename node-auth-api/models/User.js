@@ -11,7 +11,7 @@ const userSchema = new mongoose.Schema({
     default: 'user',
   },
   token: { type: String, default: null }, // Add a field to store the token
-
+  isActive: { type: Boolean, default: true }, // Add isActive field with default true
 }, { timestamps: true });
 
 // Hash password before saving

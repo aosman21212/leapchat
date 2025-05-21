@@ -24,6 +24,7 @@ import { useLanguage } from "@/lib/i18n/language-context"
 import { getTranslation } from "@/lib/i18n/translations"
 import { cn } from "@/lib/utils"
 import { Sheet, SheetContent } from "@/components/ui/sheet"
+import { hasRole } from "@/services/user.service"
 
 interface SidebarProps {
   open: boolean
@@ -75,8 +76,11 @@ export function DashboardSidebar({ open, onOpenChange }: SidebarProps) {
 
   const menuItems = [
     { icon: LayoutDashboard, label: getTranslation(language, "dashboard"), href: "/dashboard" },
+    ...(hasRole(["manager", "superadmin"]) ? [
     { icon: MessageSquare, label: getTranslation(language, "channels"), href: "/dashboard/channels" },
+    ] : []),
     { icon: Mail, label: getTranslation(language, "campaigns"), href: "/dashboard/campaigns" },
+    { icon: MessageCircle, label: getTranslation(language, "smscampaigns"), href: "/dashboard/smscampaigns" },
     { icon: Users, label: getTranslation(language, "users"), href: "/dashboard/users" },
   ]
 

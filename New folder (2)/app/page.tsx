@@ -5,6 +5,7 @@ import { useLanguage } from "@/lib/i18n/language-context"
 import { getTranslation } from "@/lib/i18n/translations"
 import { LanguageSwitcher } from "@/components/language-switcher"
 import Image from "next/image"
+import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbPage } from "@/components/ui/breadcrumb"
 
 export default function Home() {
   const { language } = useLanguage()

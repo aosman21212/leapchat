@@ -4,11 +4,15 @@ const Channel = require('../models/Channel');
 const Message = require('../models/Message'); // Import a new Message model (if needed)
  // Import the Channel model
 const authMiddleware = require('../middleware/authMiddleware'); // Import the auth middleware
+const { cacheMiddleware, clearCacheByPattern } = require('../config/redis');
 
 const router = express.Router();
 
-// First API: Fetch newsletters
-router.get('/', authMiddleware(), async (req, res) => {
+// Cache duration in seconds
+const CACHE_DURATION = 300; // 5 minutes
+
+// First API: Fetch newsletters with Redis caching
+router.get('/', authMiddleware(), cacheMiddleware(CACHE_DURATION), async (req, res) => {
   try {
     const apiUrl = 'https://gate.whapi.cloud/newsletters';
     const queryParams = {
@@ -47,8 +51,16 @@ router.get('/', authMiddleware(), async (req, res) => {
           };
           
           console.log('Saving channel data:', channelData);
-          // Save to database
-          await Channel.create(channelData);
+          // Use findOneAndUpdate with upsert to prevent duplicates
+          await Channel.findOneAndUpdate(
+            { id: newsletter.id }, // Find by unique id
+            channelData, // Update with new data
+            { 
+              upsert: true, // Create if doesn't exist
+              new: true, // Return the updated document
+              setDefaultsOnInsert: true // Apply schema defaults on insert
+            }
+          );
         } catch (dbError) {
           console.error('Error saving individual newsletter:', dbError);
           console.error('Newsletter data that failed:', newsletter);
@@ -86,11 +98,12 @@ router.get('/', authMiddleware(), async (req, res) => {
   }
 });
 
-router.get('/messages', authMiddleware(), async (req, res) => {
+// Fetch messages with Redis caching
+router.get('/messages', authMiddleware(), cacheMiddleware(CACHE_DURATION), async (req, res) => {
   try {
-    const apiUrl = 'https://gate.whapi.cloud/messages/list ';
+    const apiUrl = 'https://gate.whapi.cloud/messages/list';
     const queryParams = {
-      count: 100, // Number of messages to fetch
+      count: 100,
     };
     const headers = {
       Accept: 'application/json',
@@ -100,12 +113,28 @@ router.get('/messages', authMiddleware(), async (req, res) => {
     // Make the API request
     const response = await axios.get(apiUrl, { params: queryParams, headers });
 
-    // Optionally save the response to the 'message' collection
-    const messageData = new Message({
-      data: response.data, // Save the entire response data
-      createdAt: new Date(),
-    });
-    await messageData.save();
+    // Save messages with duplicate prevention
+    if (response.data && response.data.messages) {
+      for (const message of response.data.messages) {
+        try {
+          await Message.findOneAndUpdate(
+            { messageId: message.id }, // Assuming each message has a unique id
+            { 
+              data: message,
+              createdAt: new Date()
+            },
+            { 
+              upsert: true,
+              new: true,
+              setDefaultsOnInsert: true
+            }
+          );
+        } catch (dbError) {
+          console.error('Error saving individual message:', dbError);
+          console.error('Message data that failed:', message);
+        }
+      }
+    }
 
     // Send the response back to the client
     res.status(200).json(response.data);
@@ -120,6 +149,31 @@ router.get('/messages', authMiddleware(), async (req, res) => {
       // For other errors (e.g., network issues)
       res.status(500).json({ message: 'An error occurred while fetching messages.' });
     }
+  }
+});
+
+// Force refresh newsletters (clears cache and fetches fresh data)
+router.post('/refresh', authMiddleware(), async (req, res) => {
+  try {
+    // Clear all meta-related caches
+    await clearCacheByPattern('cache:/api/meta*');
+    
+    // Make a new request to fetch fresh data
+    const apiUrl = 'https://gate.whapi.cloud/newsletters';
+    const queryParams = { count: 100 };
+    const headers = {
+      'accept': 'application/json',
+      'authorization': `Bearer ${process.env.WHAPI_KEY}`
+    };
+
+    const response = await axios.get(apiUrl, { params: queryParams, headers });
+    res.status(200).json(response.data);
+  } catch (error) {
+    console.error('Error refreshing newsletters:', error);
+    res.status(500).json({ 
+      message: 'An error occurred while refreshing newsletters.',
+      error: error.message
+    });
   }
 });
 

@@ -16,6 +16,8 @@ const bulkMessageRoutes = require('./routes/bulkmessage');
 const campaignRoutes = require('./routes/campaigns');
 const newsletterMessagesRoutes = require('./routes/Getnewslettermessages');
 const userRoutes = require('./routes/user');
+const smsRoutes = require('./routes/sms');
+const dashboardRoutes = require('./routes/dashboard');
 
 dotenv.config();
 
@@ -41,6 +43,8 @@ app.use('/api/bulk-message', bulkMessageRoutes);
 app.use('/api/campaigns', campaignRoutes);
 app.use('/api/newsletter-messages', newsletterMessagesRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/sms', smsRoutes);
+app.use('/api/dashboard', dashboardRoutes);
 
 // Debug middleware to log all requests
 app.use((req, res, next) => {
