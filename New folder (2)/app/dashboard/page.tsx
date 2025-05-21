@@ -5,12 +5,18 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Users, MessageSquare, Mail, Activity } from "lucide-react"
 import { useLanguage } from "@/lib/i18n/language-context"
 import { getTranslation } from "@/lib/i18n/translations"
+import { hasRole } from "@/services/user.service"
 
 export default function Dashboard() {
   const { language } = useLanguage()
   const [user, setUser] = useState<{ email: string } | null>(null)
 
   useEffect(() => {
+    if(!hasRole(["user", "manager", "superadmin"])) {
+      // Redirect to 403 page
+      window.location.href = "/403"
+      return;
+    }
     const userData = localStorage.getItem("user")
     if (userData) {
       setUser(JSON.parse(userData))

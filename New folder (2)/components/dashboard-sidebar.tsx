@@ -24,6 +24,7 @@ import { useLanguage } from "@/lib/i18n/language-context"
 import { getTranslation } from "@/lib/i18n/translations"
 import { cn } from "@/lib/utils"
 import { Sheet, SheetContent } from "@/components/ui/sheet"
+import RoleBase from "./rolebase"
 
 interface SidebarProps {
   open: boolean
@@ -74,10 +75,10 @@ export function DashboardSidebar({ open, onOpenChange }: SidebarProps) {
   }
 
   const menuItems = [
-    { icon: LayoutDashboard, label: getTranslation(language, "dashboard"), href: "/dashboard" },
-    { icon: MessageSquare, label: getTranslation(language, "channels"), href: "/dashboard/channels" },
-    { icon: Mail, label: getTranslation(language, "campaigns"), href: "/dashboard/campaigns" },
-    { icon: Users, label: getTranslation(language, "users"), href: "/dashboard/users" },
+    { icon: LayoutDashboard, label: getTranslation(language, "dashboard"), href: "/dashboard", role: ["user", "manager", "superadmin"] },
+    { icon: MessageSquare, label: getTranslation(language, "channels"), href: "/dashboard/channels", role: ["manager", "superadmin"] },
+    { icon: Mail, label: getTranslation(language, "campaigns"), href: "/dashboard/campaigns", role: ["user", "manager", "superadmin"] },
+    { icon: Users, label: getTranslation(language, "users"), href: "/dashboard/users", role: ["manager", "superadmin"] },
   ]
 
   const SidebarContent = ({ onOpenChange }: { onOpenChange: (open: boolean) => void }) => (
@@ -111,26 +112,28 @@ export function DashboardSidebar({ open, onOpenChange }: SidebarProps) {
       <div className="flex-1 overflow-auto py-4">
         <nav className="space-y-1 px-2">
           {menuItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                "flex items-center rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                pathname === item.href
-                  ? "bg-primary text-primary-foreground"
-                  : "text-foreground hover:bg-accent hover:text-accent-foreground",
-                !open && !isMobile && "justify-center px-2",
-              )}
-              onClick={() => onOpenChange(false)}
-            >
-              <item.icon
+            <RoleBase allowedRoles={item.role as Array<"user" | "manager" | "superadmin">} key={item.href}>
+              <Link
+                key={item.href}
+                href={item.href}
                 className={cn(
-                  "h-5 w-5 flex-shrink-0",
-                  pathname === item.href ? "text-primary-foreground" : "text-primary",
+                  "flex items-center rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                  pathname === item.href
+                    ? "bg-primary text-primary-foreground"
+                    : "text-foreground hover:bg-accent hover:text-accent-foreground",
+                  !open && !isMobile && "justify-center px-2",
                 )}
-              />
-              {(open || isMobile) && <span className={cn("ml-3", dir === "rtl" && "mr-3 ml-0")}>{item.label}</span>}
-            </Link>
+                onClick={() => onOpenChange(false)}
+              >
+                <item.icon
+                  className={cn(
+                    "h-5 w-5 flex-shrink-0",
+                    pathname === item.href ? "text-primary-foreground" : "text-primary",
+                  )}
+                />
+                {(open || isMobile) && <span className={cn("ml-3", dir === "rtl" && "mr-3 ml-0")}>{item.label}</span>}
+              </Link>
+            </RoleBase>
           ))}
         </nav>
       </div>

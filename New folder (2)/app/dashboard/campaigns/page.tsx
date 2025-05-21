@@ -16,6 +16,8 @@ import { CreateCampaignForm, EditCampaignForm } from "@/components/campaigns/for
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from "@/components/ui/alert-dialog"
 import { jsPDF } from "jspdf"
 import autoTable from "jspdf-autotable"
+import { hasRole } from "@/services/user.service"
+import RoleBase from "@/components/rolebase"
 
 // Update the Campaign type to match the API response
 type Campaign = {
@@ -221,6 +223,14 @@ export default function CampaignsPage() {
     fetchData()
   }, [currentPage])
 
+  useEffect(() => {
+    if(!hasRole(["user", "manager", "superadmin"])) {
+          // Redirect to 403 page
+          window.location.href = "/403"
+          return;
+        }
+  }, []);
+
   // Calculate campaign statistics
   const totalCampaigns = campaigns.length
   const sentCampaigns = campaigns.filter((campaign) => campaign.status === "Sent").length
@@ -348,9 +358,11 @@ export default function CampaignsPage() {
           <p className="text-muted-foreground">{t.description}</p>
         </div>
         <div className="flex flex-col sm:flex-row gap-2">
-          <Button onClick={() => router.push('/dashboard/campaigns/single-whatsapp')}>
-            <MessageCircle className="mr-2 h-4 w-4" /> Single WhatsApp
-          </Button>
+          <RoleBase allowedRoles={["user", "manager", "superadmin"]}>
+            <Button onClick={() => router.push('/dashboard/campaigns/single-whatsapp')}>
+              <MessageCircle className="mr-2 h-4 w-4" /> Single WhatsApp
+            </Button>
+          </RoleBase>
           <Button onClick={() => router.push('/dashboard/campaigns/bulk-whatsapp')}>
             <Users className="mr-2 h-4 w-4" /> Bulk WhatsApp
           </Button>
