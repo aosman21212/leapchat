@@ -315,8 +315,8 @@ router.patch('/newsletter/:id', authMiddleware(), async (req, res) => {
   }
 });
 
-// Add a new channel (restricted to manager and superadmin)
-router.post('/add-channel', authMiddleware(['manager', 'superadmin']), async (req, res) => {
+// Add a new channel
+router.post('/add-channel', authMiddleware(), async (req, res) => {
   try {
     const { name, description, newsletter_pic } = req.body;
 
@@ -326,7 +326,7 @@ router.post('/add-channel', authMiddleware(['manager', 'superadmin']), async (re
       {
         name: name.trim(),
         description: description.trim(),
-        ...(newsletter_pic && { newsletter_pic: newsletter_pic.replace(/[<>]/g, '') })
+        // ...(newsletter_pic && { newsletter_pic: newsletter_pic.replace(/[<>]/g, '') })
       },
       {
         headers: {

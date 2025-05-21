@@ -16,6 +16,9 @@ import { CreateCampaignForm, EditCampaignForm } from "@/components/campaigns/for
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from "@/components/ui/alert-dialog"
 import { jsPDF } from "jspdf"
 import autoTable from "jspdf-autotable"
+import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb"
+import { hasRole } from "@/services/user.service"
+import RoleBase from "@/components/rolebase"
 
 // Update the Campaign type to match the API response
 type Campaign = {
@@ -147,6 +150,7 @@ export default function CampaignsPage() {
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null)
   const [campaignToDelete, setCampaignToDelete] = useState<Campaign | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [isNavigating, setIsNavigating] = useState(false)
   const t = translations[language as keyof typeof translations]
 
   // Fetch campaign stats
@@ -340,214 +344,249 @@ export default function CampaignsPage() {
     }
   ]
 
+  // Add prefetching for routes
+  useEffect(() => {
+    router.prefetch('/dashboard/campaigns/single-whatsapp')
+    router.prefetch('/dashboard/campaigns/bulk-whatsapp')
+  }, [router])
+
+  // Optimize navigation
+  const handleNavigation = (path: string) => {
+    setIsNavigating(true)
+    router.push(path)
+  }
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col space-y-2 sm:flex-row sm:items-center sm:justify-between sm:space-y-0">
-        <div>
-          <h1 className="text-2xl font-bold md:text-3xl">{t.title}</h1>
-          <p className="text-muted-foreground">{t.description}</p>
+    <div>
+      <Breadcrumb>
+        <BreadcrumbList>
+          <BreadcrumbItem>
+            <BreadcrumbLink href="/dashboard">Dashboard</BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbPage>Campaigns</BreadcrumbPage>
+          </BreadcrumbItem>
+        </BreadcrumbList>
+      </Breadcrumb>
+      <div className="space-y-6">
+        <div className="flex flex-col space-y-2 sm:flex-row sm:items-center sm:justify-between sm:space-y-0">
+          <div>
+            <h1 className="text-2xl font-bold md:text-3xl">{t.title}</h1>
+            <p className="text-muted-foreground">{t.description}</p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <Button 
+              onClick={() => handleNavigation('/dashboard/campaigns/single-whatsapp')}
+              disabled={isNavigating}
+            >
+              <MessageCircle className="mr-2 h-4 w-4" /> 
+              {isNavigating ? 'Loading...' : 'Single WhatsApp'}
+            </Button>
+            {hasRole(["superadmin", "manager"]) && (
+              <Button 
+                onClick={() => handleNavigation('/dashboard/campaigns/bulk-whatsapp')}
+                disabled={isNavigating}
+              >
+                <Users className="mr-2 h-4 w-4" /> 
+                {isNavigating ? 'Loading...' : 'Bulk WhatsApp'}
+              </Button>
+            )}
+            <Button variant="outline" onClick={exportToPDF}>
+              <FileText className="mr-2 h-4 w-4" /> {t.exportPDF}
+            </Button>
+          </div>
         </div>
-        <div className="flex flex-col sm:flex-row gap-2">
-          <Button onClick={() => router.push('/dashboard/campaigns/single-whatsapp')}>
-            <MessageCircle className="mr-2 h-4 w-4" /> Single WhatsApp
-          </Button>
-          <Button onClick={() => router.push('/dashboard/campaigns/bulk-whatsapp')}>
-            <Users className="mr-2 h-4 w-4" /> Bulk WhatsApp
-          </Button>
-          <Button variant="outline" onClick={exportToPDF}>
-            <FileText className="mr-2 h-4 w-4" /> {t.exportPDF}
-          </Button>
+
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Total Campaigns</CardTitle>
+              <Mail className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats?.totalCampaigns || 0}</div>
+              <p className="text-xs text-muted-foreground">
+                Total number of campaigns
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Total Messages</CardTitle>
+              <Users className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {stats?.totalMessages?.toLocaleString() || 0}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {stats?.totalSuccessful || 0} successful, {stats?.totalFailed || 0} failed
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Success Rate</CardTitle>
+              <BarChart3 className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats?.averageSuccessRate?.toFixed(1) || 0}%</div>
+              <Progress value={stats?.averageSuccessRate || 0} className="h-2 mt-2" />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Failed Messages</CardTitle>
+              <BarChart3 className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats?.totalFailed?.toLocaleString() || 0}</div>
+              <p className="text-xs text-muted-foreground">
+                {((stats?.totalFailed / stats?.totalMessages) * 100 || 0).toFixed(1)}% of total messages
+              </p>
+            </CardContent>
+          </Card>
         </div>
-      </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Total Campaigns</CardTitle>
-            <Mail className="h-4 w-4 text-muted-foreground" />
+        <Card className="mt-6">
+          <CardHeader>
+            <CardTitle>Campaign Statistics Overview</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats?.totalCampaigns || 0}</div>
-            <p className="text-xs text-muted-foreground">
-              Total number of campaigns
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Total Messages</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {stats?.totalMessages?.toLocaleString() || 0}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {stats?.totalSuccessful || 0} successful, {stats?.totalFailed || 0} failed
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Success Rate</CardTitle>
-            <BarChart3 className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats?.averageSuccessRate?.toFixed(1) || 0}%</div>
-            <Progress value={stats?.averageSuccessRate || 0} className="h-2 mt-2" />
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Failed Messages</CardTitle>
-            <BarChart3 className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats?.totalFailed?.toLocaleString() || 0}</div>
-            <p className="text-xs text-muted-foreground">
-              {((stats?.totalFailed / stats?.totalMessages) * 100 || 0).toFixed(1)}% of total messages
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card className="mt-6">
-        <CardHeader>
-          <CardTitle>Campaign Statistics Overview</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-            <div className="space-y-2">
-              <h3 className="text-sm font-medium text-muted-foreground">Campaign Metrics</h3>
-              <div className="grid gap-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">Total Campaigns</span>
-                  <span className="font-medium">{stats?.totalCampaigns || 0}</span>
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+              <div className="space-y-2">
+                <h3 className="text-sm font-medium text-muted-foreground">Campaign Metrics</h3>
+                <div className="grid gap-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">Total Campaigns</span>
+                    <span className="font-medium">{stats?.totalCampaigns || 0}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">Total Messages</span>
+                    <span className="font-medium">{stats?.totalMessages?.toLocaleString() || 0}</span>
+                  </div>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">Total Messages</span>
-                  <span className="font-medium">{stats?.totalMessages?.toLocaleString() || 0}</span>
+              </div>
+
+              <div className="space-y-2">
+                <h3 className="text-sm font-medium text-muted-foreground">Message Status</h3>
+                <div className="grid gap-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">Successful Messages</span>
+                    <span className="font-medium text-green-600">{stats?.totalSuccessful?.toLocaleString() || 0}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">Failed Messages</span>
+                    <span className="font-medium text-red-600">{stats?.totalFailed?.toLocaleString() || 0}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <h3 className="text-sm font-medium text-muted-foreground">Performance</h3>
+                <div className="grid gap-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">Success Rate</span>
+                    <span className="font-medium">{stats?.averageSuccessRate?.toFixed(2) || 0}%</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">Failure Rate</span>
+                    <span className="font-medium">
+                      {((stats?.totalFailed / stats?.totalMessages) * 100 || 0).toFixed(2)}%
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
 
-            <div className="space-y-2">
-              <h3 className="text-sm font-medium text-muted-foreground">Message Status</h3>
-              <div className="grid gap-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">Successful Messages</span>
-                  <span className="font-medium text-green-600">{stats?.totalSuccessful?.toLocaleString() || 0}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">Failed Messages</span>
-                  <span className="font-medium text-red-600">{stats?.totalFailed?.toLocaleString() || 0}</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <h3 className="text-sm font-medium text-muted-foreground">Performance</h3>
-              <div className="grid gap-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">Success Rate</span>
-                  <span className="font-medium">{stats?.averageSuccessRate?.toFixed(2) || 0}%</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">Failure Rate</span>
-                  <span className="font-medium">
-                    {((stats?.totalFailed / stats?.totalMessages) * 100 || 0).toFixed(2)}%
+            <div className="mt-6 space-y-4">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span>Message Success Distribution</span>
+                  <span className="text-muted-foreground">
+                    {stats?.totalSuccessful?.toLocaleString() || 0} / {stats?.totalMessages?.toLocaleString() || 0}
                   </span>
                 </div>
+                <Progress 
+                  value={(stats?.totalSuccessful / stats?.totalMessages) * 100 || 0} 
+                  className="h-2"
+                />
               </div>
             </div>
-          </div>
+          </CardContent>
+        </Card>
 
-          <div className="mt-6 space-y-4">
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-sm">
-                <span>Message Success Distribution</span>
-                <span className="text-muted-foreground">
-                  {stats?.totalSuccessful?.toLocaleString() || 0} / {stats?.totalMessages?.toLocaleString() || 0}
-                </span>
-              </div>
-              <Progress 
-                value={(stats?.totalSuccessful / stats?.totalMessages) * 100 || 0} 
-                className="h-2"
-              />
-            </div>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">Campaigns</h1>
+            <p className="text-muted-foreground">Manage your marketing campaigns</p>
           </div>
-        </CardContent>
-      </Card>
-
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Campaigns</h1>
-          <p className="text-muted-foreground">Manage your marketing campaigns</p>
         </div>
+
+        {isLoading ? (
+          <div className="flex items-center justify-center p-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+          </div>
+        ) : (
+          <DataTable
+            data={campaigns}
+            columns={columns}
+            title={t.campaignList}
+            description={`${t.showingPage} ${currentPage} ${t.of} ${totalPages}`}
+            searchPlaceholder={t.searchPlaceholder}
+            exportFilename={t.exportFilename}
+            initialPageSize={10}
+            pageSizeOptions={[5, 10, 20]}
+          />
+        )}
+
+        <CreateCampaignForm open={createDialogOpen} onOpenChange={setCreateDialogOpen} />
+        {selectedCampaign && (
+          <EditCampaignForm
+            open={editDialogOpen}
+            onOpenChange={setEditDialogOpen}
+            campaignId={selectedCampaign._id}
+            initialData={{
+              name: selectedCampaign.name,
+              description: selectedCampaign.description,
+            }}
+          />
+        )}
+        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t.deleteDialog.title}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t.deleteDialog.description}
+                {campaignToDelete && ` "${campaignToDelete.name}"`}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={isDeleting}>{t.deleteDialog.cancel}</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  setIsDeleting(true)
+                  // Implement the delete logic here
+                }}
+                disabled={isDeleting}
+                className="bg-red-500 hover:bg-red-600 focus:ring-red-500"
+              >
+                {isDeleting ? (
+                  <>
+                    <span className="mr-2 h-4 w-4 animate-spin">⟳</span> {t.deleteDialog.deleting}
+                  </>
+                ) : (
+                  t.deleteDialog.delete
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
-
-      {isLoading ? (
-        <div className="flex items-center justify-center p-12">
-          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
-        </div>
-      ) : (
-        <DataTable
-          data={campaigns}
-          columns={columns}
-          title={t.campaignList}
-          description={`${t.showingPage} ${currentPage} ${t.of} ${totalPages}`}
-          searchPlaceholder={t.searchPlaceholder}
-          exportFilename={t.exportFilename}
-          initialPageSize={10}
-          pageSizeOptions={[5, 10, 20]}
-        />
-      )}
-
-      <CreateCampaignForm open={createDialogOpen} onOpenChange={setCreateDialogOpen} />
-      {selectedCampaign && (
-        <EditCampaignForm
-          open={editDialogOpen}
-          onOpenChange={setEditDialogOpen}
-          campaignId={selectedCampaign._id}
-          initialData={{
-            name: selectedCampaign.name,
-            description: selectedCampaign.description,
-          }}
-        />
-      )}
-      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t.deleteDialog.title}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t.deleteDialog.description}
-              {campaignToDelete && ` "${campaignToDelete.name}"`}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>{t.deleteDialog.cancel}</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                setIsDeleting(true)
-                // Implement the delete logic here
-              }}
-              disabled={isDeleting}
-              className="bg-red-500 hover:bg-red-600 focus:ring-red-500"
-            >
-              {isDeleting ? (
-                <>
-                  <span className="mr-2 h-4 w-4 animate-spin">⟳</span> {t.deleteDialog.deleting}
-                </>
-              ) : (
-                t.deleteDialog.delete
-              )}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   )
 }

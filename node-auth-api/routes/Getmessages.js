@@ -1,11 +1,15 @@
 const express = require('express');
 const axios = require('axios'); // For making HTTP requests
 const Message = require('../models/Message'); // Import the Message model
+const { cacheMiddleware, clearCacheByPattern } = require('../utils/redisCache');
 
 const router = express.Router();
 
+// Cache duration in seconds (5 minutes)
+const CACHE_DURATION = 300;
+
 // Route to fetch messages from the API and save them in MongoDB
-router.get('/:newsletterId', async (req, res) => {
+router.get('/:newsletterId', cacheMiddleware('messages:newsletter', CACHE_DURATION), async (req, res) => {
   try {
         let { newsletterId } = req.params;
         const { count = 100 } = req.query;
@@ -64,6 +68,16 @@ router.get('/:newsletterId', async (req, res) => {
             });
         }
   }
+});
+
+// POST endpoint to clear message caches
+router.post('/clear-cache', async (req, res) => {
+    try {
+        await clearCacheByPattern('messages:*');
+        res.json({ message: 'Message caches cleared successfully' });
+    } catch (error) {
+        res.status(500).json({ message: 'Error clearing caches', error: error.message });
+    }
 });
 
 module.exports = router;

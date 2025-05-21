@@ -1,23 +1,90 @@
 const express = require('express');
 const User = require('../models/User');
 const authMiddleware = require('../middleware/authMiddleware');
-const NodeCache = require('node-cache');
+const { cacheMiddleware, clearCacheByPattern } = require('../config/redis');
+const bcrypt = require('bcryptjs');
 
 const router = express.Router();
 
-// Initialize cache with 5 minutes TTL
-const cache = new NodeCache({ stdTTL: 300 });
+// Cache duration in seconds (5 minutes)
+const CACHE_DURATION = 300;
 
-// Get user statistics (accessible by all authenticated users)
-router.get('/stats', authMiddleware(), async (req, res) => {
+// Create new user (accessible by superadmin and manager)
+router.post('/', authMiddleware(['superadmin', 'manager']), async (req, res) => {
     try {
-        const cacheKey = 'user_stats';
-        const cachedStats = cache.get(cacheKey);
+        const { username, email, password, role } = req.body;
 
-        if (cachedStats) {
-            return res.json(cachedStats);
+        // Validate required fields
+        if (!username || !email || !password || !role) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Please provide all required fields: username, email, password, and role'
+            });
         }
 
+        // Check if user already exists
+        const existingUser = await User.findOne({
+            $or: [{ email }, { username }]
+        });
+
+        if (existingUser) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'User with this email or username already exists'
+            });
+        }
+
+        // Hash password
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+
+        // Create new user
+        const newUser = new User({
+            username,
+            email,
+            password: hashedPassword,
+            role,
+            isActive: true
+        });
+
+        // Save user
+        await newUser.save();
+
+        // Invalidate relevant caches
+        await Promise.all([
+            clearCacheByPattern('user:list*'),
+            clearCacheByPattern('user:stats*')
+        ]);
+
+        // Return user without password
+        const userResponse = {
+            id: newUser._id,
+            username: newUser.username,
+            email: newUser.email,
+            role: newUser.role,
+            isActive: newUser.isActive,
+            createdAt: newUser.createdAt,
+            updatedAt: newUser.updatedAt
+        };
+
+        res.status(201).json({
+            status: 'success',
+            message: 'User created successfully',
+            user: userResponse
+        });
+    } catch (error) {
+        console.error('Error creating user:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error creating user',
+            error: error.message
+        });
+    }
+});
+
+// Get user statistics (accessible by all authenticated users)
+router.get('/stats', authMiddleware(), cacheMiddleware('user:stats', CACHE_DURATION), async (req, res) => {
+    try {
         const stats = await User.aggregate([
             {
                 $group: {
@@ -36,7 +103,6 @@ router.get('/stats', authMiddleware(), async (req, res) => {
             lastRegistered: await User.findOne().sort({ createdAt: -1 }).select('createdAt')
         };
 
-        cache.set(cacheKey, result);
         res.json(result);
     } catch (error) {
         res.status(500).json({ message: 'Error fetching user statistics', error: error.message });
@@ -44,19 +110,12 @@ router.get('/stats', authMiddleware(), async (req, res) => {
 });
 
 // Get all users with pagination and filtering (accessible by all authenticated users)
-router.get('/', authMiddleware(), async (req, res) => {
+router.get('/', authMiddleware(), cacheMiddleware(CACHE_DURATION), async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
         const skip = (page - 1) * limit;
         const { role, search } = req.query;
-
-        const cacheKey = `users_${page}_${limit}_${role}_${search}`;
-        const cachedData = cache.get(cacheKey);
-
-        if (cachedData) {
-            return res.json(cachedData);
-        }
 
         // Build query
         const query = {};
@@ -88,7 +147,6 @@ router.get('/', authMiddleware(), async (req, res) => {
             }
         };
 
-        cache.set(cacheKey, result);
         res.json(result);
     } catch (error) {
         res.status(500).json({ message: 'Error fetching users', error: error.message });
@@ -96,21 +154,13 @@ router.get('/', authMiddleware(), async (req, res) => {
 });
 
 // Get a single user by ID (accessible by all authenticated users)
-router.get('/:id', authMiddleware(), async (req, res) => {
+router.get('/:id', authMiddleware(), cacheMiddleware(CACHE_DURATION), async (req, res) => {
     try {
-        const cacheKey = `user_${req.params.id}`;
-        const cachedUser = cache.get(cacheKey);
-
-        if (cachedUser) {
-            return res.json(cachedUser);
-        }
-
         const user = await User.findById(req.params.id).select('-password').lean();
         if (!user) {
             return res.status(404).json({ message: 'User not found' });
         }
 
-        cache.set(cacheKey, user);
         res.json(user);
     } catch (error) {
         res.status(500).json({ message: 'Error fetching user', error: error.message });
@@ -131,9 +181,7 @@ router.put('/:id', authMiddleware(), async (req, res) => {
         }
 
         // Invalidate relevant caches
-        cache.del('user_stats');
-        cache.del(`user_${req.params.id}`);
-        cache.del(/^users_/);
+        await clearCacheByPattern('cache:/api/users/*');
 
         res.json(updatedUser);
     } catch (error) {
@@ -151,13 +199,95 @@ router.delete('/:id', authMiddleware(), async (req, res) => {
         }
 
         // Invalidate relevant caches
-        cache.del('user_stats');
-        cache.del(`user_${req.params.id}`);
-        cache.del(/^users_/);
+        await clearCacheByPattern('cache:/api/users/*');
 
-        res.json({ message: 'User deleted successfully' });
+        res.json({ 
+            status: 'success',
+            message: 'User deleted successfully',
+            user: {
+                id: user._id,
+                username: user.username,
+                email: user.email,
+                role: user.role
+            }
+        });
     } catch (error) {
-        res.status(500).json({ message: 'Error deleting user', error: error.message });
+        console.error('Error deleting user:', error);
+        res.status(500).json({ 
+            status: 'error',
+            message: 'Error deleting user', 
+            error: error.message 
+        });
+    }
+});
+
+// Toggle user activation status (accessible by superadmin and manager)
+router.put('/:id/toggle-status', authMiddleware(['superadmin', 'manager']), async (req, res) => {
+    try {
+        // Find user and verify current state
+        const user = await User.findById(req.params.id);
+        
+        if (!user) {
+            return res.status(404).json({ 
+                status: 'error',
+                message: 'User not found' 
+            });
+        }
+
+        // Log the current state
+        console.log('Current user state:', {
+            id: user._id,
+            email: user.email,
+            isActive: user.isActive,
+            role: user.role,
+            lastModified: user.updatedAt
+        });
+
+        // Toggle the active status
+        const previousStatus = user.isActive;
+        user.isActive = !user.isActive;
+        
+        // If deactivating, clear the token
+        if (!user.isActive) {
+            user.token = null;
+        }
+        
+        // Save changes to database
+        await user.save();
+
+        // Verify the changes were saved
+        const updatedUser = await User.findById(req.params.id);
+        console.log('Updated user state:', {
+            id: updatedUser._id,
+            email: updatedUser.email,
+            previousStatus: previousStatus,
+            newStatus: updatedUser.isActive,
+            role: updatedUser.role,
+            lastModified: updatedUser.updatedAt
+        });
+
+        // Invalidate caches
+        await clearCacheByPattern('cache:/api/users/*');
+
+        res.json({ 
+            status: 'success',
+            message: updatedUser.isActive ? 'User activated successfully' : 'User deactivated successfully',
+            user: {
+                id: updatedUser._id,
+                username: updatedUser.username,
+                email: updatedUser.email,
+                role: updatedUser.role,
+                isActive: updatedUser.isActive,
+                lastModified: updatedUser.updatedAt
+            }
+        });
+    } catch (error) {
+        console.error('Error toggling user status:', error);
+        res.status(500).json({ 
+            status: 'error',
+            message: 'Error toggling user status', 
+            error: error.message 
+        });
     }
 });
 

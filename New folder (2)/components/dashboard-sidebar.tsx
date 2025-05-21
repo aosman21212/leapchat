@@ -19,11 +19,13 @@ import {
   ChevronRight,
   MessageCircle,
   MessageCircleMore,
+  FileImage,
 } from "lucide-react"
 import { useLanguage } from "@/lib/i18n/language-context"
 import { getTranslation } from "@/lib/i18n/translations"
 import { cn } from "@/lib/utils"
 import { Sheet, SheetContent } from "@/components/ui/sheet"
+import { hasRole } from "@/services/user.service"
 
 interface SidebarProps {
   open: boolean
@@ -35,10 +37,18 @@ export function DashboardSidebar({ open, onOpenChange }: SidebarProps) {
   const router = useRouter()
   const pathname = usePathname()
   const [isMobile, setIsMobile] = useState(false)
+  const [userRole, setUserRole] = useState<string | null>(null)
 
   useEffect(() => {
     const checkMobile = () => {
       setIsMobile(window.innerWidth < 768)
+    }
+
+    // Get user role from localStorage
+    const userData = localStorage.getItem("user")
+    if (userData) {
+      const { role } = JSON.parse(userData)
+      setUserRole(role)
     }
 
     checkMobile()
@@ -46,6 +56,29 @@ export function DashboardSidebar({ open, onOpenChange }: SidebarProps) {
 
     return () => window.removeEventListener("resize", checkMobile)
   }, [])
+
+  // Helper function to check if menu item should be visible
+  const shouldShowMenuItem = (href: string) => {
+    if (!userRole) return false
+
+    // Superadmin can see everything
+    if (userRole === "superadmin") return true
+
+    // Manager and User cannot access users page
+    if (href === "/dashboard/users") return false
+
+    // Manager can see everything except users page
+    if (userRole === "manager") return true
+
+    // User can only see basic pages
+    const allowedUserPages = [
+      "/dashboard",
+      "/dashboard/campaigns",
+      "/dashboard/smscampaigns",
+      "/dashboard/base64-encode"
+    ]
+    return allowedUserPages.includes(href)
+  }
 
   const handleLogout = async () => {
     try {
@@ -75,9 +108,15 @@ export function DashboardSidebar({ open, onOpenChange }: SidebarProps) {
 
   const menuItems = [
     { icon: LayoutDashboard, label: getTranslation(language, "dashboard"), href: "/dashboard" },
-    { icon: MessageSquare, label: getTranslation(language, "channels"), href: "/dashboard/channels" },
+    { icon: FileImage, label: getTranslation(language, "base64Encode"), href: "/dashboard/base64-encode" },
+    ...(hasRole(["manager", "superadmin"]) ? [
+      { icon: MessageSquare, label: getTranslation(language, "channels"), href: "/dashboard/channels" },
+    ] : []),
     { icon: Mail, label: getTranslation(language, "campaigns"), href: "/dashboard/campaigns" },
-    { icon: Users, label: getTranslation(language, "users"), href: "/dashboard/users" },
+    { icon: MessageCircle, label: getTranslation(language, "smscampaigns"), href: "/dashboard/smscampaigns" },
+    ...(hasRole(["superadmin"]) ? [
+      { icon: Users, label: getTranslation(language, "users"), href: "/dashboard/users" },
+    ] : []),
   ]
 
   const SidebarContent = ({ onOpenChange }: { onOpenChange: (open: boolean) => void }) => (
@@ -111,26 +150,28 @@ export function DashboardSidebar({ open, onOpenChange }: SidebarProps) {
       <div className="flex-1 overflow-auto py-4">
         <nav className="space-y-1 px-2">
           {menuItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                "flex items-center rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                pathname === item.href
-                  ? "bg-primary text-primary-foreground"
-                  : "text-foreground hover:bg-accent hover:text-accent-foreground",
-                !open && !isMobile && "justify-center px-2",
-              )}
-              onClick={() => onOpenChange(false)}
-            >
-              <item.icon
+            shouldShowMenuItem(item.href) && (
+              <Link
+                key={item.href}
+                href={item.href}
                 className={cn(
-                  "h-5 w-5 flex-shrink-0",
-                  pathname === item.href ? "text-primary-foreground" : "text-primary",
+                  "flex items-center rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                  pathname === item.href
+                    ? "bg-primary text-primary-foreground"
+                    : "text-foreground hover:bg-accent hover:text-accent-foreground",
+                  !open && !isMobile && "justify-center px-2",
                 )}
-              />
-              {(open || isMobile) && <span className={cn("ml-3", dir === "rtl" && "mr-3 ml-0")}>{item.label}</span>}
-            </Link>
+                onClick={() => onOpenChange(false)}
+              >
+                <item.icon
+                  className={cn(
+                    "h-5 w-5 flex-shrink-0",
+                    pathname === item.href ? "text-primary-foreground" : "text-primary",
+                  )}
+                />
+                {(open || isMobile) && <span className={cn("ml-3", dir === "rtl" && "mr-3 ml-0")}>{item.label}</span>}
+              </Link>
+            )
           ))}
         </nav>
       </div>

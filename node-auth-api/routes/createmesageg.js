@@ -2,10 +2,13 @@ const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 const Campaign = require('../models/Campaign');
-
 const authMiddleware = require('../middleware/authMiddleware');
+const { cacheMiddleware, clearCacheByPattern } = require('../config/redis');
 
-// POST endpoint to send an image message
+// Cache duration in seconds
+const CACHE_DURATION = 300; // 5 minutes
+
+// POST endpoint to send an image message with cache invalidation
 router.post('/image', authMiddleware(), async (req, res) => {
     try {
         const { to, media, caption, edit } = req.body;
@@ -58,6 +61,9 @@ router.post('/image', authMiddleware(), async (req, res) => {
 
         await campaign.save();
 
+        // Clear campaign-related caches
+        await clearCacheByPattern('cache:/api/create-message/campaigns*');
+
         // Return the response with campaign ID
         res.json({
             ...response.data,
@@ -82,6 +88,9 @@ router.post('/image', authMiddleware(), async (req, res) => {
                 }]
             });
             await campaign.save();
+
+            // Clear campaign-related caches even for failed attempts
+            await clearCacheByPattern('cache:/api/create-message/campaigns*');
         } catch (dbError) {
             console.error('Error saving failed campaign:', dbError);
         }
@@ -106,8 +115,8 @@ router.post('/image', authMiddleware(), async (req, res) => {
     }
 });
 
-// GET all campaigns with pagination
-router.get('/campaigns', authMiddleware(), async (req, res) => {
+// GET all campaigns with pagination and Redis caching
+router.get('/campaigns', authMiddleware(), cacheMiddleware(CACHE_DURATION), async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
@@ -116,7 +125,8 @@ router.get('/campaigns', authMiddleware(), async (req, res) => {
         const campaigns = await Campaign.find()
             .sort({ createdAt: -1 })
             .skip(skip)
-            .limit(limit);
+            .limit(limit)
+            .lean();
 
         const total = await Campaign.countDocuments();
 
@@ -134,10 +144,10 @@ router.get('/campaigns', authMiddleware(), async (req, res) => {
     }
 });
 
-// GET single campaign by ID
-router.get('/campaign/:id', authMiddleware(), async (req, res) => {
+// GET single campaign by ID with Redis caching
+router.get('/campaign/:id', authMiddleware(), cacheMiddleware(CACHE_DURATION), async (req, res) => {
     try {
-        const campaign = await Campaign.findById(req.params.id);
+        const campaign = await Campaign.findById(req.params.id).lean();
         if (!campaign) {
             return res.status(404).json({ message: 'Campaign not found' });
         }
@@ -147,8 +157,8 @@ router.get('/campaign/:id', authMiddleware(), async (req, res) => {
     }
 });
 
-// GET campaigns by date range
-router.get('/campaigns/date-range', authMiddleware(), async (req, res) => {
+// GET campaigns by date range with Redis caching
+router.get('/campaigns/date-range', authMiddleware(), cacheMiddleware(CACHE_DURATION), async (req, res) => {
     try {
         const { startDate, endDate } = req.query;
         
@@ -161,7 +171,9 @@ router.get('/campaigns/date-range', authMiddleware(), async (req, res) => {
                 $gte: new Date(startDate),
                 $lte: new Date(endDate)
             }
-        }).sort({ createdAt: -1 });
+        })
+        .sort({ createdAt: -1 })
+        .lean();
 
         res.json(campaigns);
     } catch (error) {
@@ -169,8 +181,8 @@ router.get('/campaigns/date-range', authMiddleware(), async (req, res) => {
     }
 });
 
-// GET campaign statistics
-router.get('/campaigns/stats', authMiddleware(), async (req, res) => {
+// GET campaign statistics with Redis caching
+router.get('/campaigns/stats', authMiddleware(), cacheMiddleware(CACHE_DURATION), async (req, res) => {
     try {
         const stats = await Campaign.aggregate([
             {
@@ -204,6 +216,17 @@ router.get('/campaigns/stats', authMiddleware(), async (req, res) => {
         });
     } catch (error) {
         res.status(500).json({ message: 'Error fetching campaign statistics', error: error.message });
+    }
+});
+
+// Clear message cache
+router.post('/clear-cache', authMiddleware(), async (req, res) => {
+    try {
+        await clearCacheByPattern('cache:/api/create-message/*');
+        res.json({ message: 'Message cache cleared successfully' });
+    } catch (error) {
+        console.error('Clear cache error:', error);
+        res.status(500).json({ message: 'Error clearing message cache' });
     }
 });
 

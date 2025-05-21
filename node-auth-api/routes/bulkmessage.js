@@ -5,8 +5,12 @@ const xlsx = require('xlsx');
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage() });
 const Campaign = require('../models/Campaign');
+const { cacheMiddleware, clearCacheByPattern } = require('../utils/redisCache');
 
 const authMiddleware = require('../middleware/authMiddleware');
+
+// Cache duration in seconds (5 minutes)
+const CACHE_DURATION = 300;
 
 // Helper function to create delay
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -24,6 +28,14 @@ const isValidPhoneNumber = (number) => {
     const pattern = /^[\d-]{10,31}(@[\w\.]{1,})?$/;
     return pattern.test(number);
 };
+
+// GET endpoint to check campaign status (deprecated)
+router.get('/status', authMiddleware(), (req, res) => {
+    res.status(404).json({
+        success: false,
+        message: 'This endpoint has been removed. Please use /api/bulk/campaigns to get campaign information.'
+    });
+});
 
 // Direct bulk message sending
 router.post('/bulk', authMiddleware(), upload.single('file'), async (req, res) => {
@@ -159,6 +171,9 @@ router.post('/bulk', authMiddleware(), upload.single('file'), async (req, res) =
 
         await campaign.save();
 
+        // Clear relevant caches
+        await clearCacheByPattern('bulk:*');
+
         res.status(200).json({
             success: true,
             message: 'Bulk messages sent successfully',
@@ -178,25 +193,36 @@ router.post('/bulk', authMiddleware(), upload.single('file'), async (req, res) =
 });
 
 // GET endpoint to retrieve campaign details
-router.get('/campaign/:id', authMiddleware(), async (req, res) => {
+router.get('/campaign/:id', authMiddleware(), cacheMiddleware('bulk:campaign', CACHE_DURATION), async (req, res) => {
     try {
-        const campaign = await Campaign.findById(req.params.id);
+        const campaign = await Campaign.findById(req.params.id).lean();
         if (!campaign) {
             return res.status(404).json({ message: 'Campaign not found' });
         }
         res.json(campaign);
+
     } catch (error) {
         res.status(500).json({ message: 'Error retrieving campaign', error: error.message });
     }
 });
 
 // GET endpoint to list all campaigns
-router.get('/campaigns', authMiddleware(), async (req, res) => {
+router.get('/campaigns', authMiddleware(), cacheMiddleware('bulk:campaigns', CACHE_DURATION), async (req, res) => {
     try {
-        const campaigns = await Campaign.find().sort({ createdAt: -1 });
+        const campaigns = await Campaign.find().sort({ createdAt: -1 }).lean();
         res.json(campaigns);
     } catch (error) {
         res.status(500).json({ message: 'Error retrieving campaigns', error: error.message });
+    }
+});
+
+// POST endpoint to clear bulk message caches
+router.post('/clear-cache', authMiddleware(), async (req, res) => {
+    try {
+        await clearCacheByPattern('bulk:*');
+        res.json({ message: 'Bulk message caches cleared successfully' });
+    } catch (error) {
+        res.status(500).json({ message: 'Error clearing caches', error: error.message });
     }
 });
 

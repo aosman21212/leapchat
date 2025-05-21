@@ -1,7 +1,7 @@
 "use client";
 
 import type React from "react";
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
@@ -11,12 +11,28 @@ import { useToast } from "@/components/ui/use-toast";
 import { useLanguage } from "@/lib/i18n/language-context";
 import { getTranslation } from "@/lib/i18n/translations";
 import Link from "next/link";
-import { EyeIcon, EyeOffIcon, Loader2 } from "lucide-react";
+import { EyeIcon, EyeOffIcon, Loader2, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 interface LoginError {
   message: string;
   status?: number;
+}
+
+interface User {
+  id: string;
+  username: string;
+  email: string;
+  role: string;
+  isActive: boolean;
+}
+
+interface LoginResponse {
+  status: 'success' | 'error';
+  message: string;
+  token?: string;
+  user?: User;
 }
 
 export function LoginForm() {
@@ -25,26 +41,28 @@ export function LoginForm() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const router = useRouter();
   const { toast } = useToast();
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Memoize the submit handler to prevent unnecessary re-renders
+  const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Basic validation before making the API call
+    if (!email.trim() || !password) {
+      setError("Please fill in all fields");
+      return;
+    }
+
     setIsLoading(true);
+    setError(null);
 
     try {
-      console.log('Starting login attempt...');
-      console.log('Email:', email.trim());
-      
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
 
-      const apiUrl = "http://localhost:5000/api/auth/login";
-      console.log('Making fetch request to:', apiUrl);
-      
-      let response;
-      try {
-        response = await fetch(apiUrl, {
+      const response = await fetch("http://localhost:5000/api/auth/login", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -54,88 +72,60 @@ export function LoginForm() {
             email: email.trim(),
             password: password,
           }),
-          signal: controller.signal,
+        signal: controller.signal
         });
-      } catch (fetchError) {
-        console.error('Fetch error:', fetchError);
-        throw new Error(`Failed to connect to server: ${fetchError instanceof Error ? fetchError.message : 'Unknown error'}`);
-      }
 
       clearTimeout(timeoutId);
 
-      console.log('Response received:');
-      console.log('Status:', response.status);
-      console.log('Status Text:', response.statusText);
-      console.log('Headers:', Object.fromEntries(response.headers.entries()));
-
-      // Get the response text first for debugging
-      const responseText = await response.text();
-      console.log('Raw response text:', responseText);
-
-      // Try to parse the response as JSON
-      let data;
-      try {
-        data = JSON.parse(responseText);
-        console.log('Parsed response data:', data);
-      } catch (parseError) {
-        console.error('Error parsing JSON:', parseError);
-        console.error('Raw response that failed to parse:', responseText);
-        throw new Error(`Invalid JSON response from server: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`);
-      }
+      const data: LoginResponse = await response.json();
 
       if (!response.ok) {
-        console.error('Response not OK:', {
-          status: response.status,
-          statusText: response.statusText,
-          data: data
-        });
-        
-        const errorMessage = data?.message || data?.error || `Server error: ${response.status} ${response.statusText}`;
-        throw new Error(errorMessage);
+        throw new Error(data.message || `Server error: ${response.status}`);
       }
 
-      if (!data?.token) {
-        console.error('No token in response:', data);
-        throw new Error('No authentication token received from server');
+      if (data.status === 'error') {
+        throw new Error(data.message);
+      }
+
+      if (!data.token || !data.user) {
+        throw new Error("Invalid response from server");
+      }
+
+      // Check if user is deactivated
+      if (data.user.isActive === false) {
+        setError("Your account has been deactivated. Please contact your administrator.");
+        return;
       }
 
       // Store auth state
       localStorage.setItem("isAuthenticated", "true");
-      localStorage.setItem("user", JSON.stringify({ email: email.trim() }));
+      localStorage.setItem("user", JSON.stringify(data.user));
       localStorage.setItem("token", data.token);
-
-      console.log('Login successful, stored token:', data.token);
 
       // Show success message
       toast({
         title: getTranslation(language, "loginSuccessful"),
-        description: getTranslation(language, "welcomeBack"),
+        description: data.message || getTranslation(language, "welcomeBack"),
       });
 
       // Redirect to dashboard
       router.push("/dashboard");
-      router.refresh(); // Refresh the page to update auth state
+      router.refresh();
 
     } catch (error) {
-      console.error('Login error details:', {
-        error,
-        errorType: error instanceof Error ? error.constructor.name : typeof error,
-        errorMessage: error instanceof Error ? error.message : 'Unknown error',
-        errorStack: error instanceof Error ? error.stack : undefined
-      });
-      
       let errorMessage = getTranslation(language, "loginFailed");
       
       if (error instanceof Error) {
         if (error.name === 'AbortError') {
-          errorMessage = getTranslation(language, "requestTimeout");
-        } else if (error.message.includes('Failed to connect to server')) {
-          errorMessage = "Cannot connect to server. Please check if the server is running at http://localhost:5000";
+          errorMessage = "Request timed out. Please try again.";
         } else {
           errorMessage = error.message;
         }
+      } else if (typeof error === 'string') {
+        errorMessage = error;
       }
 
+      setError(errorMessage);
       toast({
         title: getTranslation(language, "error"),
         description: errorMessage,
@@ -144,12 +134,19 @@ export function LoginForm() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [email, password, language, router, toast]);
 
   return (
     <Card className="border-t-4 border-t-primary shadow-lg">
-      <form onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit} className="animate-in fade-in duration-300">
         <CardContent className="space-y-4 pt-6">
+          {error && (
+            <Alert variant="destructive" className="mb-4 animate-in slide-in-from-top duration-300">
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>{getTranslation(language, "error")}</AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
           <div className="space-y-2">
             <Label htmlFor="email">{getTranslation(language, "email")}</Label>
             <Input
@@ -161,6 +158,7 @@ export function LoginForm() {
               required
               className={cn(dir === "rtl" && "text-right")}
               disabled={isLoading}
+              autoComplete="email"
             />
           </div>
           <div className="space-y-2">
@@ -183,6 +181,7 @@ export function LoginForm() {
                 required
                 className={cn(dir === "rtl" && "text-right")}
                 disabled={isLoading}
+                autoComplete="current-password"
               />
               <Button
                 type="button"
@@ -201,7 +200,7 @@ export function LoginForm() {
         <CardFooter className="flex flex-col space-y-4">
           <Button 
             type="submit" 
-            className="w-full bg-primary hover:bg-secondary" 
+            className="w-full bg-primary hover:bg-secondary transition-colors duration-200" 
             disabled={isLoading}
           >
             {isLoading ? (
@@ -217,7 +216,7 @@ export function LoginForm() {
             {getTranslation(language, "dontHaveAccount")}{" "}
             <Link 
               href="/register" 
-              className="text-primary hover:underline"
+              className="text-primary hover:underline transition-colors duration-200"
               tabIndex={isLoading ? -1 : 0}
             >
               {getTranslation(language, "createAccount")}

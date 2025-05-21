@@ -2,14 +2,15 @@ const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 const authMiddleware = require('../middleware/authMiddleware');
-const NodeCache = require('node-cache');
+const { cacheMiddleware, clearCacheByPattern } = require('../utils/redisCache');
 
-// Initialize cache with 5 minutes TTL
-const cache = new NodeCache({ stdTTL: 300 });
+// Cache duration in seconds (5 minutes)
+const CACHE_DURATION = 300;
 
 // GET newsletter messages (accessible by superadmin and manager)
 router.get('/:newsletterId', 
     authMiddleware(['superadmin', 'manager']), 
+    cacheMiddleware('newsletter:messages', CACHE_DURATION),
     async (req, res) => {
         try {
             const { newsletterId } = req.params;
@@ -18,14 +19,6 @@ router.get('/:newsletterId',
             // Validate newsletterId
             if (!newsletterId) {
                 return res.status(400).json({ message: 'Newsletter ID is required' });
-            }
-
-            // Create cache key based on parameters
-            const cacheKey = `newsletter_messages_${newsletterId}_${count}_${page}`;
-            const cachedData = cache.get(cacheKey);
-
-            if (cachedData) {
-                return res.json(cachedData);
             }
 
             // Make API request to Whapi
@@ -52,9 +45,6 @@ router.get('/:newsletterId',
                     totalPages: Math.ceil(totalMessages / count)
                 }
             };
-
-            // Cache the result
-            cache.set(cacheKey, result);
 
             res.json(result);
         } catch (error) {
@@ -88,15 +78,10 @@ router.get('/:newsletterId',
 // GET message statistics (accessible by superadmin and manager)
 router.get('/:newsletterId/stats', 
     authMiddleware(['superadmin', 'manager']), 
+    cacheMiddleware('newsletter:stats', CACHE_DURATION),
     async (req, res) => {
         try {
             const { newsletterId } = req.params;
-            const cacheKey = `newsletter_stats_${newsletterId}`;
-            const cachedStats = cache.get(cacheKey);
-
-            if (cachedStats) {
-                return res.json(cachedStats);
-            }
 
             // Get all messages for statistics
             const response = await axios.get(
@@ -129,7 +114,6 @@ router.get('/:newsletterId/stats',
                     null
             };
 
-            cache.set(cacheKey, stats);
             res.json(stats);
         } catch (error) {
             console.error('Error fetching newsletter statistics:', error);
@@ -140,5 +124,15 @@ router.get('/:newsletterId/stats',
         }
     }
 );
+
+// POST endpoint to clear newsletter message caches
+router.post('/clear-cache', authMiddleware(['superadmin', 'manager']), async (req, res) => {
+    try {
+        await clearCacheByPattern('newsletter:*');
+        res.json({ message: 'Newsletter message caches cleared successfully' });
+    } catch (error) {
+        res.status(500).json({ message: 'Error clearing caches', error: error.message });
+    }
+});
 
 module.exports = router; 

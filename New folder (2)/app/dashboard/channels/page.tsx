@@ -3,14 +3,16 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { DataTable, type Column } from "@/components/ui/data-table";
-import { MessageSquare, Eye, RefreshCw, Database, FileText, Trash2, Edit } from "lucide-react";
+import { MessageSquare, Eye, RefreshCw, Database, FileText, Trash2, Edit, Plus } from "lucide-react";
 import { useLanguage } from "@/lib/i18n/language-context";
 import { format } from "date-fns";
 import { Badge } from "@/components/ui/badge";
 import Image from "next/image";
-import { useToast } from "@/components/ui/use-toast";
+import { useToast } from "@/hooks/use-toast";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import { CreateChannelForm } from "./create-channel-form";
+import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb"
 
 // Define the Channel type
 type Channel = {
@@ -26,6 +28,8 @@ type Channel = {
   description: string;
   preview?: string;
   role: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 // Add translations
@@ -99,6 +103,7 @@ export default function ChannelsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isFetchingChannels, setIsFetchingChannels] = useState(false);
   const [isFetchingMeta, setIsFetchingMeta] = useState(false);
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const { toast } = useToast();
   const t = translations[language as keyof typeof translations];
 
@@ -107,78 +112,70 @@ export default function ChannelsPage() {
     fetchChannelsFromAPI();
   }, []); // Empty dependency array means this runs once when component mounts
 
+  // Function to format Unix timestamp
+  const formatDate = (timestamp: number) => {
+    try {
+      if (!timestamp || isNaN(timestamp)) return "N/A";
+      const date = new Date(timestamp * 1000);
+      if (isNaN(date.getTime())) return "N/A";
+      return format(date, "MMM d, yyyy");
+    } catch (error) {
+      console.error('Date formatting error:', error);
+      return "N/A";
+    }
+  };
+
   // Fetch channels from the API
   const fetchChannelsFromAPI = async () => {
     setIsFetchingChannels(true);
     setIsLoading(true);
-    console.log('Attempting to fetch channels...');
     try {
       const token = localStorage.getItem("token");
       if (!token) {
         throw new Error("No authentication token found. Please login first.");
       }
 
-      const apiUrl = "http://localhost:5000/api/fetch-channel";
-      console.log('Fetching channels from URL:', apiUrl);
-
-      const response = await fetch(apiUrl, {
-        method: "GET",
+      const response = await fetch('http://localhost:5000/api/fetch-channel', {
+        method: 'GET',
         headers: {
-          "Authorization": `Bearer ${token}`,
-          "Accept": "application/json"
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/json'
         }
       });
 
-      console.log('API Response status:', response.status);
-      console.log('API Response headers:', Object.fromEntries(response.headers.entries()));
-
-      const responseText = await response.text();
-      console.log('Raw response text:', responseText);
-
-      let data;
-      try {
-        data = JSON.parse(responseText);
-        console.log('Parsed response data:', data);
-      } catch (parseError) {
-        console.error('Error parsing JSON:', parseError);
-        throw new Error('Invalid JSON response from server');
-      }
+      const data = await response.json();
 
       if (!response.ok) {
         throw new Error(data.message || `HTTP error! status: ${response.status}`);
       }
 
-      if (!data || !data.data || !Array.isArray(data.data)) {
-        console.error('Invalid API response format:', data);
-        throw new Error("Invalid API response format: expected data array");
+      if (!data.success || !data.data || !Array.isArray(data.data)) {
+        throw new Error("Invalid API response format");
       }
 
-      // Filter channels to show only those where the user is the owner
-      const mappedChannels: Channel[] = data.data
-        .filter((item: any) => item.role === 'owner')
-        .map((item: any) => ({
-          id: item.id || '',
-          name: item.name || '',
-          type: item.type || '',
-          chat_pic: item.chat_pic || '',
-          chat_pic_full: item.chat_pic_full || '',
-          created_at: item.created_at || 0,
-          description_at: item.description_at || 0,
-          invite_code: item.invite_code || '',
-          verification: item.verification || false,
-          description: item.description || '',
-          preview: item.preview || '',
-          role: item.role || 'subscriber',
-        }));
-
-      console.log('Mapped channels (owner only):', mappedChannels);
+      // Map the API response to our Channel type
+      const mappedChannels: Channel[] = data.data.map((item: any) => ({
+        id: item.id || item._id || '',
+        name: item.name || '',
+        type: item.type || '',
+        description: item.description || '',
+        created_at: item.created_at || 0,
+        description_at: typeof item.description_at === 'string' ? parseInt(item.description_at) : item.description_at || 0,
+        invite_code: item.invite_code || '',
+        verification: item.verification || false,
+        role: item.role || 'subscriber',
+        chat_pic: item.chat_pic || '',
+        chat_pic_full: item.chat_pic_full || '',
+        preview: item.preview || '',
+        createdAt: item.createdAt || '',
+        updatedAt: item.updatedAt || ''
+      }));
 
       setChannels(mappedChannels);
-      console.log('Channels state updated.', mappedChannels.length, 'channels');
       
       toast({
         title: "Channels Fetched",
-        description: `Successfully fetched ${mappedChannels.length} channels where you are the owner.`,
+        description: `Successfully fetched ${mappedChannels.length} channels.`,
       });
     } catch (error: unknown) {
       console.error('Error fetching channels:', error);
@@ -188,10 +185,10 @@ export default function ChannelsPage() {
         description: errorMessage,
         variant: "destructive",
       });
+      setChannels([]);
     } finally {
       setIsLoading(false);
       setIsFetchingChannels(false);
-      console.log('Fetch channels process finished.');
     }
   };
 
@@ -233,15 +230,6 @@ export default function ChannelsPage() {
     }
   };
 
-  // Function to format Unix timestamp
-  const formatDate = (timestamp: number) => {
-    try {
-      return format(new Date(timestamp * 1000), "MMM d, yyyy");
-    } catch (error) {
-      return "Invalid date";
-    }
-  };
-
   // Function to navigate to channel details page
   const viewChannelDetails = (channelId: string) => {
     const id = extractId(channelId);
@@ -256,8 +244,13 @@ export default function ChannelsPage() {
 
   // Update PDF export function with translations
   const exportToPDF = () => {
-    const doc = new jsPDF();
-    
+    // Create a new jsPDF instance
+    const doc = new jsPDF({
+      orientation: 'landscape',
+      unit: 'mm',
+      format: 'a4'
+    });
+
     // Add title
     doc.setFontSize(16);
     doc.text(t.channelList, 14, 15);
@@ -295,20 +288,39 @@ export default function ChannelsPage() {
       styles: {
         fontSize: 8,
         cellPadding: 2,
+        halign: language === 'ar' ? 'right' : 'left'
       },
       headStyles: {
         fillColor: [41, 128, 185],
         textColor: 255,
         fontSize: 9,
         fontStyle: "bold",
+        halign: language === 'ar' ? 'right' : 'left'
       },
       alternateRowStyles: {
         fillColor: [245, 245, 245],
       },
+      theme: 'grid',
+      didDrawPage: function(data) {
+        // Add page numbers
+        doc.setFontSize(8);
+        doc.text(
+          `Page ${doc.internal.pages.length - 1}`,
+          data.settings.margin.left,
+          doc.internal.pageSize.height - 10
+        );
+      }
     });
 
-    // Save the PDF
-    doc.save(`${t.exportFilename}.pdf`);
+    // Save the PDF with proper encoding
+    const pdfOutput = doc.output('arraybuffer');
+    const blob = new Blob([pdfOutput], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${t.exportFilename}.pdf`;
+    link.click();
+    URL.revokeObjectURL(url);
   };
 
   // Add deleteChannel function before the columns definition
@@ -364,15 +376,27 @@ export default function ChannelsPage() {
     }
   }
 
+  // Add this function to handle successful channel creation
+  const handleChannelCreated = () => {
+    fetchChannelsFromAPI(); // Refresh the channels list
+    toast({
+      title: "Success",
+      description: "Channel created successfully",
+    });
+  };
+
   // Define columns for the DataTable
   const columns: Column<Channel>[] = [
     {
       header: t.columns.id,
       accessorKey: "id",
       enableSorting: true,
-      cell: (row) => extractId(row.id),
+      cell: (row) => {
+        const fullId = row.id.includes('@') ? row.id : `${row.id}@newsletter`
+        return <code className="text-sm">{fullId}</code>
+      },
       meta: {
-        className: "w-[50px]",
+        className: "w-[200px]",
       },
     },
     {
@@ -384,7 +408,7 @@ export default function ChannelsPage() {
         <div className="flex items-center gap-3">
           {row.chat_pic ? (
             <Image
-              src={row.chat_pic || "/placeholder.svg"}
+              src={row.chat_pic}
               alt={row.name}
               width={32}
               height={32}
@@ -490,58 +514,81 @@ export default function ChannelsPage() {
   ];
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col space-y-2 sm:flex-row sm:items-center sm:justify-between sm:space-y-0">
-        <div>
-          <h1 className="text-2xl font-bold md:text-3xl">{t.title}</h1>
-          <p className="text-muted-foreground">{t.description}</p>
+    <div>
+      <Breadcrumb>
+        <BreadcrumbList>
+          <BreadcrumbItem>
+            <BreadcrumbLink href="/dashboard">Dashboard</BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbPage>Channels</BreadcrumbPage>
+          </BreadcrumbItem>
+        </BreadcrumbList>
+      </Breadcrumb>
+      <div className="container mx-auto py-6 space-y-6">
+        <div className="flex flex-col space-y-2 sm:flex-row sm:items-center sm:justify-between sm:space-y-0">
+          <div>
+            <h1 className="text-2xl font-bold md:text-3xl">{t.title}</h1>
+            <p className="text-muted-foreground">{t.description}</p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <Button variant="outline" onClick={fetchChannelsFromAPI} disabled={isFetchingChannels}>
+              {isFetchingChannels ? (
+                <>
+                  <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> {t.fetching}
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="mr-2 h-4 w-4" /> {t.fetchChannels}
+                </>
+              )}
+            </Button>
+            <Button variant="outline" onClick={fetchMetaData} disabled={isFetchingMeta}>
+              {isFetchingMeta ? (
+                <>
+                  <Database className="mr-2 h-4 w-4 animate-spin" /> {t.fetching}
+                </>
+              ) : (
+                <>
+                  <Database className="mr-2 h-4 w-4" /> {t.getData}
+                </>
+              )}
+            </Button>
+            <Button variant="outline" onClick={exportToPDF}>
+              <FileText className="mr-2 h-4 w-4" /> {t.exportPDF}
+            </Button>
+            <Button onClick={() => setIsCreateDialogOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" /> Add Channel
+            </Button>
+          </div>
         </div>
-        <div className="flex flex-col sm:flex-row gap-2">
-          <Button variant="outline" onClick={fetchChannelsFromAPI} disabled={isFetchingChannels}>
-            {isFetchingChannels ? (
-              <>
-                <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> {t.fetching}
-              </>
-            ) : (
-              <>
-                <RefreshCw className="mr-2 h-4 w-4" /> {t.fetchChannels}
-              </>
-            )}
-          </Button>
-          <Button variant="outline" onClick={fetchMetaData} disabled={isFetchingMeta}>
-            {isFetchingMeta ? (
-              <>
-                <Database className="mr-2 h-4 w-4 animate-spin" /> {t.fetching}
-              </>
-            ) : (
-              <>
-                <Database className="mr-2 h-4 w-4" /> {t.getData}
-              </>
-            )}
-          </Button>
-          <Button variant="outline" onClick={exportToPDF}>
-            <FileText className="mr-2 h-4 w-4" /> {t.exportPDF}
-          </Button>
-        </div>
-      </div>
-      {isLoading ? (
-        <div className="flex items-center justify-center p-12">
-          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
-        </div>
-      ) : (
-        <DataTable
-          data={channels}
-          columns={columns}
-          title={t.channelList}
-          description={t.showingOnly}
-          searchPlaceholder={t.searchPlaceholder}
-          exportFilename={t.exportFilename}
-          initialPageSize={10}
-          pageSizeOptions={[5, 10, 20]}
-          isLoading={isLoading}
-          onRefresh={fetchChannelsFromAPI}
+
+        {isLoading ? (
+          <div className="flex items-center justify-center p-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+          </div>
+        ) : (
+          <DataTable
+            data={channels}
+            columns={columns}
+            title={t.channelList}
+            description={t.showingOnly}
+            searchPlaceholder={t.searchPlaceholder}
+            exportFilename={t.exportFilename}
+            initialPageSize={10}
+            pageSizeOptions={[5, 10, 20]}
+            isLoading={isLoading}
+            onRefresh={fetchChannelsFromAPI}
+          />
+        )}
+
+        <CreateChannelForm 
+          open={isCreateDialogOpen}
+          onOpenChange={setIsCreateDialogOpen}
+          onSuccess={handleChannelCreated}
         />
-      )}
+      </div>
     </div>
   );
 }
